@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PiMusic</title>
+  <link rel="icon" type="image/x-icon"  href="/static/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <span class="logo">PiMusic</span>
+</header>
+
+<section id="player">
+  <div id="now-playing">
+    <span id="track-name">Nothing playing</span>
+    <span id="track-pos"></span>
+  </div>
+  <div id="controls">
+    <button id="btn-prev"      title="Previous track" onclick="cmdPrev()"      disabled>&#9664;&#9664;</button>
+    <button id="btn-playpause" title="Play"            onclick="cmdPlayPause()" disabled>&#9654; Play</button>
+    <button id="btn-stop"      title="Stop"            onclick="cmdStop()"      disabled>&#9632;</button>
+    <button id="btn-next"      title="Next track"      onclick="cmdNext()"      disabled>&#9654;&#9654;</button>
+  </div>
+  <div id="state-badge" class="badge stopped">stopped</div>
+</section>
+
+<section id="browser">
+  <div id="breadcrumb"></div>
+  <ul id="file-list"></ul>
+</section>
+
+<footer id="progressbar" hidden>
+  <span id="prog-current">0:00</span>
+  <div id="prog-track"><div id="prog-fill"></div></div>
+  <span id="prog-total">0:00</span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

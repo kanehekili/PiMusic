@@ -1,0 +1,15 @@
+[Unit]
+Description=PiMusic web player
+After=network.target
+
+[Service]
+Type=simple
+# Change User and paths to match where you deployed the app on the Pi.
+User=pi
+WorkingDirectory=/home/pi/pimusic
+ExecStart=/usr/bin/python3 /home/pi/pimusic/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

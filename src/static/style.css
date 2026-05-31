@@ -1,0 +1,170 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #111827;
+  color: #e5e7eb;
+  min-height: 100vh;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #1f2937;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #374151;
+}
+.logo { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.05em; color: #60a5fa; }
+
+/* Player bar */
+#player {
+  position: sticky;
+  top: 2.75rem;
+  z-index: 10;
+  background: #1f2937;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid #374151;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+#now-playing {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+#track-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
+  color: #f9fafb;
+}
+#track-pos { font-size: 0.75rem; color: #9ca3af; }
+
+#controls { display: flex; gap: 0.5rem; }
+#controls button {
+  background: #374151;
+  color: #e5e7eb;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#controls button:hover:not(:disabled) { background: #4b5563; }
+#controls button:disabled { opacity: 0.35; cursor: default; }
+#btn-pause.is-paused { color: #34d399; }
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+.badge.stopped  { background: #374151; color: #9ca3af; }
+.badge.playing  { background: #065f46; color: #6ee7b7; }
+.badge.paused   { background: #78350f; color: #fcd34d; }
+
+/* Progress bar */
+#progressbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 10;
+  background: #1f2937;
+  border-top: 1px solid #374151;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+#progressbar[hidden] { display: none; }
+#prog-current, #prog-total {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  min-width: 3rem;
+  font-variant-numeric: tabular-nums;
+}
+#prog-total { text-align: right; }
+#prog-track {
+  flex: 1;
+  height: 6px;
+  background: #374151;
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+}
+#prog-fill {
+  height: 100%;
+  background: #60a5fa;
+  width: 0%;
+  transition: width 0.9s linear;
+}
+
+/* File browser */
+#browser { padding: 0.75rem 1rem 3.5rem; }
+
+#breadcrumb {
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-bottom: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  align-items: center;
+}
+.crumb { cursor: pointer; color: #60a5fa; }
+.crumb:hover { text-decoration: underline; }
+.crumb-sep { color: #4b5563; }
+.crumb-current { color: #e5e7eb; }
+
+#file-list { list-style: none; }
+#file-list li {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #1f2937;
+  transition: background 0.1s;
+}
+.col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-dur  { font-size: 0.8rem; color: #9ca3af; text-align: right; min-width: 3.5rem; }
+.col-type { font-size: 0.7rem; color: #6b7280; text-align: right; min-width: 2rem; }
+#file-list li:hover { background: #1f2937; }
+li.config-error {
+  color: #fca5a5;
+  background: #3b1010;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  cursor: default;
+  border: none;
+}
+li.config-error:hover { background: #3b1010; }
+
+#file-list li.selected { background: #1c2e45; outline: 1px solid #3b82f6; }
+#file-list li.active   { background: #1e3a5f; color: #93c5fd; }
+
+.icon {
+  width: 1.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+li[data-type="dir"]      .icon { color: #fbbf24; }
+li[data-type="playlist"] .icon { color: #a78bfa; }
+li[data-type="audio"]    .icon { color: #34d399; }
+li[data-type="parent"]   .icon { color: #9ca3af; }
