@@ -8,12 +8,15 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="manifest" href="/static/site.webmanifest">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_ver('style.css') }}">
 </head>
 <body>
 
 <header>
-  <span class="logo">PiMusic</span>
+  <img class="header-icon" src="/static/icon-512.png" alt="">
+  <span class="logo">Pi Music</span>
+  <span id="state-badge" class="badge stopped">stopped</span>
 </header>
 
 <section id="player">
@@ -26,8 +29,8 @@
     <button id="btn-playpause" title="Play"            onclick="cmdPlayPause()" disabled>&#9654; Play</button>
     <button id="btn-stop"      title="Stop"            onclick="cmdStop()"      disabled>&#9632;</button>
     <button id="btn-next"      title="Next track"      onclick="cmdNext()"      disabled>&#9654;&#9654;</button>
+    <button id="btn-shuffle"   title="Shuffle"         onclick="cmdShuffle()"          >&#8652;</button>
   </div>
-  <div id="state-badge" class="badge stopped">stopped</div>
 </section>
 
 <section id="browser">
@@ -37,10 +40,10 @@
 
 <footer id="progressbar" hidden>
   <span id="prog-current">0:00</span>
-  <div id="prog-track"><div id="prog-fill"></div></div>
+  <div id="prog-hit"><div id="prog-track"><div id="prog-fill"></div></div></div>
   <span id="prog-total">0:00</span>
 </footer>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ static_ver('app.js') }}"></script>
 </body>
 </html>

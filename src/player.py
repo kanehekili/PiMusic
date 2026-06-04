@@ -1,7 +1,9 @@
 import os
+import random
 import re
 import subprocess
 import threading
+import time
 
 from config import PLAYLIST_EXTENSIONS
 from OSTools import Log
@@ -24,6 +26,10 @@ class _BasePlayer:
         self._generation = 0      # incremented on every load; invalidates stale timers
         self.position = 0.0       # current playback position in seconds
         self.duration = 0.0       # total track duration in seconds
+        self.source_path = None   # file passed to play() — audio file or playlist
+        self.shuffle = False
+        self._playlist_orig = []  # original order before shuffling
+        self._track_changed = False  # consumed once by status()
 
     # ------------------------------------------------------------------
     # Public API
@@ -31,6 +37,7 @@ class _BasePlayer:
 
     def play(self, path):
         with self._lock:
+            self.source_path = path
             ext = os.path.splitext(path)[1].lower()
             if ext in PLAYLIST_EXTENSIONS:
                 self.playlist = self._parse_playlist(path)
@@ -41,6 +48,13 @@ class _BasePlayer:
                     return
             else:
                 self.playlist, self.current_index = self._folder_playlist(path)
+            self._playlist_orig = list(self.playlist)
+            if self.shuffle and len(self.playlist) > 1:
+                first = self.playlist[self.current_index]
+                random.shuffle(self.playlist)
+                self.playlist.remove(first)
+                self.playlist.insert(0, first)
+                self.current_index = 0
             self._load_locked()
 
     def next(self):
@@ -57,7 +71,26 @@ class _BasePlayer:
         with self._lock:
             self._do_pause_locked()
 
-    def seek(self, position):
+    def toggle_shuffle(self):
+        with self._lock:
+            self.shuffle = not self.shuffle
+            if len(self.playlist) > 1 and self.current_index >= 0:
+                tail_start = self.current_index + 1
+                if self.shuffle:
+                    tail = self.playlist[tail_start:]
+                    random.shuffle(tail)
+                    self.playlist[tail_start:] = tail
+                else:
+                    current = self.playlist[self.current_index]
+                    try:
+                        orig_idx = self._playlist_orig.index(current)
+                    except ValueError:
+                        orig_idx = -1
+                    self.playlist[tail_start:] = self._playlist_orig[orig_idx + 1:]
+            Log.info("Shuffle: %s", self.shuffle)
+            return self.shuffle
+
+    def seek(self, fraction):
         pass  # overridden by backends that support seeking
 
     def stop(self):
@@ -74,17 +107,22 @@ class _BasePlayer:
 
     def status(self):
         with self._lock:
+            track_changed = self._track_changed
+            self._track_changed = False
             local = not any(self._is_url(t) for t in self.playlist)
             return {
                 "state": self.state,
                 "track_name": self._display_name(),
                 "current_file": self.current_file,
+                "source_path": self.source_path,
+                "shuffle": self.shuffle,
                 "playlist_pos": self.current_index + 1 if self.current_index >= 0 else 0,
                 "playlist_len": len(self.playlist),
                 "has_next": self.current_index < len(self.playlist) - 1 and local,
                 "has_prev": self.current_index > 0 and local,
                 "position": self.position,
                 "duration": self.duration,
+                "track_changed": track_changed,
             }
 
     # ------------------------------------------------------------------
@@ -119,6 +157,7 @@ class _BasePlayer:
             self.stream_title = None
             self.position = 0.0
             self.duration = 0.0
+            self._track_changed = True
             self._generation += 1
             self._do_load(self.current_file)
 
@@ -265,8 +304,9 @@ class _Mpg123Player(_BasePlayer):
                         rem = float(parts[4])
                         with self._lock:
                             self.position = pos
-                            self.duration = pos + rem
-                            self._total_frames = cur_frame + rem_frames
+                            if self.duration == 0.0:
+                                self.duration = pos + rem
+                                self._total_frames = cur_frame + rem_frames
                     except ValueError:
                         pass
 
@@ -279,11 +319,10 @@ class _Mpg123Player(_BasePlayer):
                     if title:
                         Log.info("Stream: %s", title)
 
-    def seek(self, position):
+    def seek(self, fraction):
         with self._lock:
-            if self.duration > 0 and self._total_frames > 0:
-                frame = int(self._total_frames * (position / self.duration))
-                self.position = position
+            if self._total_frames > 0:
+                frame = int(self._total_frames * fraction)
                 Log.info("mpg123 << JUMP %d", frame)
                 self._send(f"JUMP {frame}")
 
@@ -314,6 +353,7 @@ class _MplayerPlayer(_BasePlayer):
     def __init__(self):
         super().__init__()
         self._process = None
+        self._grace_until = 0.0
         self._start_process()
 
     def _start_process(self):
@@ -340,7 +380,10 @@ class _MplayerPlayer(_BasePlayer):
         def _reset_watchdog(gen):
             if _watchdog[0]:
                 _watchdog[0].cancel()
-            t = threading.Timer(1.5, self._eof_watchdog, args=[gen])
+            with self._lock:
+                is_stream = self._is_url(self.current_file or "")
+            timeout = 30.0 if is_stream else 1.5
+            t = threading.Timer(timeout, self._eof_watchdog, args=[gen])
             t.daemon = True
             t.start()
             _watchdog[0] = t
@@ -352,15 +395,38 @@ class _MplayerPlayer(_BasePlayer):
 
             if line.startswith("A:"):
                 m = re.match(r'A:\s*([\d.]+).*?of\s*([\d.]+)', line)
+                now = time.monotonic()
                 with self._lock:
                     if m:
                         try:
                             self.position = float(m.group(1))
-                            self.duration = float(m.group(2))
+                            if self.duration == 0.0 and now >= self._grace_until:
+                                self.duration = float(m.group(2))
                         except ValueError:
                             pass
+                    else:
+                        m2 = re.match(r'A:\s*([\d.]+)', line)
+                        if m2:
+                            try:
+                                self.position = float(m2.group(1))
+                            except ValueError:
+                                pass
+                    need_dur = self.duration == 0.0 and now >= self._grace_until
                     gen = self._generation
+                if need_dur:
+                    self._send("get_time_length")
                 _reset_watchdog(gen)
+                continue
+
+            if line.startswith("ANS_LENGTH="):
+                try:
+                    length = float(line.split("=", 1)[1])
+                except (ValueError, IndexError):
+                    length = 0.0
+                with self._lock:
+                    if length > 0 and self.duration == 0.0 and time.monotonic() >= self._grace_until:
+                        self.duration = length
+                        Log.info("mplayer: duration %.1fs", length)
                 continue
 
             m = re.search(r"StreamTitle='([^']*)'", line)
@@ -368,8 +434,10 @@ class _MplayerPlayer(_BasePlayer):
                 title = m.group(1).strip()
                 with self._lock:
                     self.stream_title = title or None
+                    gen = self._generation
                 if title:
                     Log.info("Stream: %s", title)
+                _reset_watchdog(gen)
 
     def _eof_watchdog(self, gen):
         with self._lock:
@@ -387,15 +455,15 @@ class _MplayerPlayer(_BasePlayer):
             except BrokenPipeError:
                 pass
 
-    def seek(self, position):
+    def seek(self, fraction):
         with self._lock:
             if self.state in ("playing", "paused"):
-                self.position = position
-                Log.info("mplayer << seek %.1f", position)
-                self._send(f"seek {position:.1f} 2")
+                Log.info("mplayer << seek %.1f%%", fraction * 100)
+                self._send(f"seek {fraction * 100:.2f} 1")
 
     def _do_load(self, path):
         self.state = "playing"          # optimistic; lock is held by caller
+        self._grace_until = time.monotonic() + 0.5  # ignore stale A: lines for 500ms
         escaped = path.replace("\\", "\\\\").replace('"', '\\"')
         Log.info("mplayer << loadfile %s", path)
         self._send(f'loadfile "{escaped}"')

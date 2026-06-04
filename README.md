@@ -49,18 +49,18 @@ rsync -av src/ <user>@<pi-ip>:~/pimusic/
 **Debian / Raspberry Pi OS**
 
 ```bash
-sudo apt install python3-flask mpg123        # for mpg123 backend
-sudo apt install python3-flask mplayer       # for mplayer backend
+sudo apt install python3-flask mediainfo mpg123    # for mpg123 backend
+sudo apt install python3-flask mediainfo mplayer   # for mplayer backend
 ```
 
 **Arch / Manjaro ARM**
 
 ```bash
-sudo pacman -S python-flask mpg123           # for mpg123 backend
-sudo pacman -S python-flask mplayer          # for mplayer backend
+sudo pacman -S python-flask mediainfo mpg123        # for mpg123 backend
+sudo pacman -S python-flask mediainfo mplayer       # for mplayer backend
 ```
 
-If your distro does not provide a Flask package, install it via pip as a last resort:
+If your distro does not provide these packages, install them via pip:
 
 ```bash
 pip install -r ~/pimusic/requirements.txt

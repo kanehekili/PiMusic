@@ -14,13 +14,28 @@ header {
   background: #1f2937;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid #374151;
+  display: flex;
+  align-items: center;
 }
-.logo { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.05em; color: #60a5fa; }
+.header-icon {
+  height: 48px;
+  width: auto;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.logo {
+  position: absolute;
+  left: 0; right: 0;
+  text-align: center;
+  pointer-events: none;
+  font-size: 1.1rem; font-weight: 700; letter-spacing: 0.05em; color: #60a5fa;
+}
+#state-badge { margin-left: auto; }
 
 /* Player bar */
 #player {
   position: sticky;
-  top: 2.75rem;
+  top: 73px; /* 48px icon + 2×12px padding + 1px border */
   z-index: 10;
   background: #1f2937;
   padding: 0.75rem 1rem;
@@ -60,7 +75,8 @@ header {
 }
 #controls button:hover:not(:disabled) { background: #4b5563; }
 #controls button:disabled { opacity: 0.35; cursor: default; }
-#btn-pause.is-paused { color: #34d399; }
+#btn-pause.is-paused  { color: #34d399; }
+#btn-shuffle.is-active { color: #60a5fa; background: #1e3a5f; }
 
 .badge {
   font-size: 0.7rem;
@@ -94,19 +110,46 @@ header {
   font-variant-numeric: tabular-nums;
 }
 #prog-total { text-align: right; }
-#prog-track {
+#prog-hit {
   flex: 1;
+  padding: 12px 0;
+  cursor: pointer;
+}
+#prog-track {
   height: 6px;
   background: #374151;
   border-radius: 3px;
   overflow: hidden;
-  cursor: pointer;
 }
 #prog-fill {
   height: 100%;
   background: #60a5fa;
   width: 0%;
   transition: width 0.9s linear;
+}
+#progressbar.is-stream #prog-fill {
+  width: 100%;
+  background: linear-gradient(90deg, #1f2937 0%, #60a5fa 50%, #1f2937 100%);
+  background-size: 200% 100%;
+  animation: stream-shimmer 2s linear infinite;
+  transition: none;
+}
+#progressbar.is-broken #prog-fill {
+  background: linear-gradient(90deg, #1f2937 0%, #ef4444 50%, #1f2937 100%);
+  background-size: 200% 100%;
+  animation: stream-shimmer 2s linear infinite;
+}
+#progressbar.is-broken #prog-current,
+#progressbar.is-broken #prog-total { color: #ef4444; }
+@keyframes stream-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Portrait / narrow screens: controls first, track name below */
+@media (max-width: 600px) {
+  #controls    { order: 1; width: 100%; }
+  #now-playing { order: 2; }
 }
 
 /* File browser */

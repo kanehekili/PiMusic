@@ -2,6 +2,7 @@
 
 let currentPath = '';
 let currentPlayingPath = null;
+let initialNavDone = false;
 let selectedPath = null;
 let selectedItem = null;   // DOM <li> reference for the selected row
 let lastState = 'stopped';
@@ -47,6 +48,14 @@ function renderBrowser(data) {
   }
 
   (data.entries || []).forEach(e => ul.appendChild(makeItem(e)));
+
+  const active = ul.querySelector('li.active');
+  if (active) active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  if (data.pending_durations > 0) {
+    const refreshPath = data.path;
+    setTimeout(() => { if (currentPath === refreshPath) browse(refreshPath); }, 5000);
+  }
 }
 
 function makeItem(entry) {
@@ -94,11 +103,7 @@ function makeItem(entry) {
   li.addEventListener('dblclick', () => {
     if (entry.type !== 'dir' && entry.type !== 'parent') {
       selectEntry(li, entry.path);
-      const path = entry.path;
-      post('/api/play', { path }).then(() => {
-        currentPlayingPath = path;
-        refreshFileList();
-      });
+      playTrack(entry.path);
     }
   });
 
@@ -170,27 +175,32 @@ function updatePlayButton() {
   btn.disabled = lastState !== 'stopped' ? false : !selectedPath;
 }
 
+function resetProgressBar() {
+  document.getElementById('prog-fill').style.width = '0%';
+  document.getElementById('prog-current').textContent = '0:00';
+  document.getElementById('prog-total').textContent = '0:00';
+}
+
+function playTrack(path) {
+  post('/api/play', { path }).then(r => {
+    if (!r) return;
+    r.json().then(renderStatus);
+  });
+}
+
 function cmdPlayPause() {
   if (lastState === 'stopped') {
     if (!selectedPath) return;
-    const path = selectedPath;
-    post('/api/play', { path }).then(() => {
-      currentPlayingPath = path;
-      refreshFileList();
-    });
+    playTrack(selectedPath);
   } else {
     post('/api/pause');
   }
 }
 
-function cmdPrev()  { post('/api/previous'); }
-function cmdNext()  { post('/api/next'); }
-function cmdStop()  {
-  post('/api/stop').then(() => {
-    currentPlayingPath = null;
-    refreshFileList();
-  });
-}
+function cmdPrev()    { post('/api/previous'); }
+function cmdNext()    { post('/api/next'); }
+function cmdShuffle() { post('/api/shuffle'); }
+function cmdStop() { post('/api/stop'); }
 
 function post(url, body) {
   return fetch(url, {
@@ -224,10 +234,24 @@ function renderStatus(s) {
       ? `Track ${s.playlist_pos} of ${s.playlist_len}`
       : '';
 
-  // Follow the currently playing file (handles auto-advance)
-  const newPath = s.current_path || null;
-  if (newPath !== currentPlayingPath) {
-    currentPlayingPath = newPath;
+  // Backend signals a new track started — reset the progress bar
+  if (s.track_changed) {
+    resetProgressBar();
+  }
+
+  // Follow the currently playing file/stream; for streams use the source playlist path
+  const newPath = s.current_path || s.source_path || null;
+  const pathChanged = newPath !== currentPlayingPath;
+  if (pathChanged) currentPlayingPath = newPath;
+
+  if (!initialNavDone) {
+    initialNavDone = true;
+    // On fresh page load navigate to the folder containing what's playing, or root
+    const folder = (newPath && s.state !== 'stopped')
+      ? newPath.includes('/') ? newPath.split('/').slice(0, -1).join('/') : ''
+      : '';
+    browse(folder);
+  } else if (pathChanged) {
     refreshFileList();
   }
 
@@ -258,22 +282,39 @@ function renderStatus(s) {
   // Stop — only useful while something is loaded
   document.getElementById('btn-stop').disabled = !active;
 
-  // Prev / Next — driven by playlist position and stream detection
+  // Prev / Next / Shuffle
   document.getElementById('btn-prev').disabled = !s.has_prev;
   document.getElementById('btn-next').disabled = !s.has_next;
+  document.getElementById('btn-shuffle').classList.toggle('is-active', !!s.shuffle);
 
-  // Progress bar — only for local files with known duration
+  // Progress bar
   const dur = s.duration || 0;
   lastDuration = dur;
   const progBar = document.getElementById('progressbar');
-  if (dur > 0 && s.state !== 'stopped') {
-    const pct = Math.min(100, ((s.position || 0) / dur) * 100).toFixed(1);
-    document.getElementById('prog-fill').style.width = pct + '%';
+  const isStream = !s.current_path && !!s.track_name;
+  if (s.state !== 'stopped' && s.track_name) {
+    document.getElementById('prog-current').textContent = fmtTime(dur ? Math.min(s.position, dur) : s.position);
+    if (!isStream && dur > 0) {
+      const pct = Math.min(100, ((s.position || 0) / dur) * 100).toFixed(1);
+      document.getElementById('prog-fill').style.width = pct + '%';
+      document.getElementById('prog-total').textContent = fmtTime(dur);
+      progBar.classList.remove('is-stream', 'is-broken');
+    } else {
+      document.getElementById('prog-fill').style.width = '';
+      document.getElementById('prog-total').textContent = 'LIVE';
+      progBar.classList.add('is-stream');
+      progBar.classList.remove('is-broken');
+    }
+    progBar.hidden = false;
+  } else if (s.state === 'stopped' && isStream) {
+    // stream broke — track_name still set but nothing playing
     document.getElementById('prog-current').textContent = fmtTime(s.position);
-    document.getElementById('prog-total').textContent = fmtTime(dur);
+    document.getElementById('prog-total').textContent = 'OFFLINE';
+    progBar.classList.add('is-stream', 'is-broken');
     progBar.hidden = false;
   } else {
     progBar.hidden = true;
+    progBar.classList.remove('is-stream', 'is-broken');
   }
 }
 
@@ -286,13 +327,12 @@ function refreshFileList() {
 // Init
 // ---------------------------------------------------------------------------
 
-document.getElementById('prog-track').addEventListener('click', function (e) {
-  if (!lastDuration) return;
+document.getElementById('prog-hit').addEventListener('click', function (e) {
+  if (lastState === 'stopped') return;
   const rect = this.getBoundingClientRect();
   const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  post('/api/seek', { position: frac * lastDuration });
+  post('/api/seek', { fraction: frac });
 });
 
-browse('');
 setInterval(pollStatus, 1000);
 pollStatus();
