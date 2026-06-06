@@ -2,10 +2,13 @@
 
 A lightweight web-based music player for Raspberry Pi. Browse a local or NAS-mounted music library from any browser on your network and play music through the Pi's audio output using mpg123 or mplayer.
 
-Tested on a **Raspberry Pi 1B** — the oldest Pi hardware still in circulation.
+No streaming to the device yet. 
+
+Runs on a **Raspberry Pi 1B** — and newer versions as well as on any other hardware using Linux.
+
+![Screenshot](https://github.com/kanehekili/PiMusic/blob/master/PiMusicView.png)
 
 ## Features
-
 - Browse nested folders of music files, M3U and PLS playlists
 - Play internet radio streams from PLS/M3U playlists
 - Displays live ICY stream metadata (artist / track title) for internet radio
