@@ -6,7 +6,7 @@ No streaming to the device yet.
 
 Runs on a **Raspberry Pi 1B** — and newer versions as well as on any other hardware using Linux.
 
-![Screenshot](https://github.com/kanehekili/PiMusic/blob/master/PiMusicView.png)
+![Screenshot](https://github.com/kanehekili/PiMusic/blob/main/PiMusicView.png)
 
 ## Features
 - Browse nested folders of music files, M3U and PLS playlists
