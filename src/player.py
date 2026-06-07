@@ -1,11 +1,12 @@
 import os
 import random
 import re
+import signal
 import subprocess
 import threading
 import time
 
-from config import PLAYLIST_EXTENSIONS
+from config import MUSIC_ROOT, PLAYLIST_EXTENSIONS
 from OSTools import Log
 
 
@@ -212,11 +213,22 @@ class _BasePlayer:
             else:
                 norm = line.replace("\\", "/")   # handle Windows-style paths
                 p = norm if os.path.isabs(norm) else os.path.join(base, norm)
+                if not os.path.isfile(p) and os.path.isabs(norm) and MUSIC_ROOT:
+                    p = self._remap_abs_path(norm) or p
                 if os.path.isfile(p) and os.path.splitext(p)[1].lower() in self.audio_extensions:
                     tracks.append(os.path.realpath(p))
                 else:
                     Log.warning("M3U: skipped (not found or wrong type): %s", line)
         return tracks
+
+    def _remap_abs_path(self, abs_path):
+        parts = abs_path.lstrip("/").split("/")
+        for i in range(1, len(parts)):
+            candidate = os.path.join(MUSIC_ROOT, *parts[i:])
+            if os.path.isfile(candidate):
+                Log.info("M3U: remapped %s → .../%s", abs_path, "/".join(parts[i:]))
+                return candidate
+        return None
 
     def _parse_pls(self, fh, base):
         tracks = []
@@ -229,9 +241,14 @@ class _BasePlayer:
             if self._is_url(val):
                 tracks.append(val)
             else:
-                p = val if os.path.isabs(val) else os.path.join(base, val)
+                norm = val.replace("\\", "/")
+                p = norm if os.path.isabs(norm) else os.path.join(base, norm)
+                if not os.path.isfile(p) and os.path.isabs(norm) and MUSIC_ROOT:
+                    p = self._remap_abs_path(norm) or p
                 if os.path.isfile(p) and os.path.splitext(p)[1].lower() in self.audio_extensions:
-                    tracks.append(p)
+                    tracks.append(os.path.realpath(p))
+                else:
+                    Log.warning("PLS: skipped (not found or wrong type): %s", val)
         return tracks
 
     @staticmethod
@@ -244,7 +261,11 @@ class _BasePlayer:
 # ======================================================================
 
 class _Mpg123Player(_BasePlayer):
-    """Uses mpg123 --remote mode. State from @P output. ICY titles from @I lines."""
+    """
+    Local files:  mpg123 --remote --quiet  (pause and seek via PAUSE/JUMP commands)
+    Stream URLs:  mpg123 <url> direct      (reads output line by line; detects errors immediately)
+    Only one process runs at a time.
+    """
 
     audio_extensions = frozenset({".mp3"})
 
@@ -252,29 +273,66 @@ class _Mpg123Player(_BasePlayer):
         super().__init__()
         self._total_frames = 0
         self._process = None
-        self._start_process()
+        self._mode = "remote"   # "remote" | "stream"
+        self._start_remote()
 
-    def _start_process(self):
+    # ------------------------------------------------------------------ process management
+
+    def _kill_current(self):
+        if self._process and self._process.poll() is None:
+            self._process.kill()
+        self._process = None
+
+    def _start_remote(self):
+        self._kill_current()
+        self._mode = "remote"
         cmd = ["mpg123", "--remote", "--quiet"]
-        Log.info("mpg123 command: %s", " ".join(cmd))
+        Log.info("mpg123 remote: %s", " ".join(cmd))
         try:
             self._process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
             )
-            threading.Thread(target=self._monitor, daemon=True).start()
+            threading.Thread(target=self._remote_monitor, args=[self._process], daemon=True).start()
         except FileNotFoundError:
+            Log.error("mpg123 not found — install it for MP3 playback")
             self._process = None
 
-    def _monitor(self):
-        for line in self._process.stdout:
-            line = line.strip()
+    def _start_stream(self, url, gen):
+        self._kill_current()
+        self._mode = "stream"
+        Log.info("mpg123 stream << %s", url)
+        try:
+            self._process = subprocess.Popen(
+                ["mpg123", "--timeout", "10", url],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+            )
+            threading.Thread(target=self._stream_monitor, args=[self._process, url, gen], daemon=True).start()
+        except FileNotFoundError:
+            Log.error("mpg123 not found")
+            self._process = None
 
-            if line.startswith("@P"):
+    # ------------------------------------------------------------------ remote monitor (local files)
+
+    def _remote_monitor(self, proc):
+        Log.info("mpg123 remote monitor started (pid %s)", proc.pid)
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            if not line.startswith("@F"):
+                Log.info("mpg123 >> %s", line)
+            if line.startswith("@E"):
+                Log.warning("mpg123 error: %s", line[2:].strip())
+            elif not line.startswith("@"):
+                Log.warning("mpg123: %s", line)
+            elif line.startswith("@P"):
                 parts = line.split()
                 if len(parts) < 2:
                     continue
@@ -282,7 +340,10 @@ class _Mpg123Player(_BasePlayer):
                     code = int(parts[1])
                 except ValueError:
                     continue
+                gen = None
                 with self._lock:
+                    if self._process is not proc:
+                        return
                     if code == 2:
                         self.state = "playing"
                         Log.info("Now playing: %s", self._display_name())
@@ -291,25 +352,22 @@ class _Mpg123Player(_BasePlayer):
                     elif code == 0:
                         self.state = "stopped"
                         gen = self._generation
-                if code == 0:
+                if gen is not None:
                     threading.Timer(0.3, self._try_auto_advance, args=[gen]).start()
-
             elif line.startswith("@F"):
                 parts = line.split()
                 if len(parts) >= 5:
                     try:
-                        cur_frame = int(parts[1])
+                        cur_frame  = int(parts[1])
                         rem_frames = int(parts[2])
-                        pos = float(parts[3])
-                        rem = float(parts[4])
+                        pos        = float(parts[3])
+                        rem        = float(parts[4])
                         with self._lock:
                             self.position = pos
-                            if self.duration == 0.0:
-                                self.duration = pos + rem
-                                self._total_frames = cur_frame + rem_frames
+                            self.duration = pos + rem
+                            self._total_frames = cur_frame + rem_frames
                     except ValueError:
                         pass
-
             elif line.startswith("@I"):
                 m = re.search(r"StreamTitle='([^']*)'", line)
                 if m:
@@ -319,26 +377,112 @@ class _Mpg123Player(_BasePlayer):
                     if title:
                         Log.info("Stream: %s", title)
 
-    def seek(self, fraction):
         with self._lock:
-            if self._total_frames > 0:
-                frame = int(self._total_frames * fraction)
-                Log.info("mpg123 << JUMP %d", frame)
-                self._send(f"JUMP {frame}")
+            if self._process is not proc:
+                return  # intentionally replaced; don't restart
+            crashed = self.state == "playing"
+            if crashed:
+                self.state = "stopped"
+            gen = self._generation if crashed else None
+        if gen is not None:
+            threading.Timer(0.3, self._try_auto_advance, args=[gen]).start()
+        Log.warning("mpg123 remote process exited unexpectedly; restarting")
+        self._start_remote()
+
+    # ------------------------------------------------------------------ stream monitor (direct URL)
+
+    def _stream_monitor(self, proc, url, gen):
+        Log.info("mpg123 stream monitor started (pid %s)", proc.pid)
+        confirmed = False
+        for bline in iter(proc.stdout.readline, b""):
+            line = bline.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            Log.info("stream >> %s", line)
+
+            with self._lock:
+                if self._process is not proc or gen != self._generation:
+                    return  # superseded
+
+            if re.search(r'error', line, re.IGNORECASE):
+                Log.error("Stream error (%s): %s", url, line)
+                if not confirmed:
+                    with self._lock:
+                        if self._process is proc and gen == self._generation:
+                            self.state = "stopped"
+                    self._try_auto_advance(gen)
+                    self._start_remote()
+                    return
+
+            if not confirmed and re.search(r'StreamTitle|ICY|kbit|MPEG', line, re.IGNORECASE):
+                confirmed = True
+                with self._lock:
+                    if self._process is proc and gen == self._generation:
+                        self.state = "playing"
+                Log.info("Now playing stream: %s", url)
+
+            m = re.search(r"StreamTitle='([^']*)'", line)
+            if m:
+                title = m.group(1).strip()
+                with self._lock:
+                    if self._process is proc and gen == self._generation:
+                        self.stream_title = title or None
+                if title:
+                    Log.info("Stream title: %s", title)
+
+        # Process exited (stream ended or killed)
+        with self._lock:
+            if self._process is not proc or gen != self._generation:
+                return
+            self.state = "stopped"
+            g = self._generation
+        Log.info("Stream ended: %s", url)
+        self._try_auto_advance(g)
+        self._start_remote()
+
+    # ------------------------------------------------------------------ send / control
 
     def _send(self, cmd):
-        if self._process and self._process.poll() is None:
+        if self._mode == "remote" and self._process and self._process.poll() is None:
             try:
                 self._process.stdin.write(cmd + "\n")
                 self._process.stdin.flush()
             except BrokenPipeError:
-                pass
+                Log.warning("mpg123 stdin broken pipe: %s", cmd)
+
+    def seek(self, fraction):
+        with self._lock:
+            if self._mode == "remote" and self._total_frames > 0:
+                frame = int(self._total_frames * fraction)
+                Log.info("mpg123 << JUMP %d", frame)
+                self._send(f"JUMP {frame}")
 
     def _do_load(self, path):
-        Log.info("mpg123 << LOAD %s", path)
-        self._send(f"LOAD {path}")
-    def _do_stop(self):             self._send("STOP")
-    def _do_pause_locked(self):     self._send("PAUSE")
+        self._total_frames = 0
+        if self._is_url(path):
+            self._start_stream(path, self._generation)
+        else:
+            if self._mode != "remote":
+                self._start_remote()
+            Log.info("mpg123 << LOAD %s", path)
+            self._send(f"LOAD {path}")
+
+    def _do_stop(self):
+        if self._mode == "stream":
+            self._kill_current()
+            self._start_remote()
+        else:
+            self._send("STOP")
+
+    def _do_pause_locked(self):
+        if self._mode == "stream":
+            return  # streams: pause is disabled; use Stop to disconnect
+        if self.state == "playing":
+            self.state = "paused"
+            self._send("PAUSE")
+        elif self.state == "paused":
+            self.state = "playing"
+            self._send("PAUSE")
 
 
 # ======================================================================
@@ -353,43 +497,64 @@ class _MplayerPlayer(_BasePlayer):
     def __init__(self):
         super().__init__()
         self._process = None
+        self._pgid = None               # saved at start; valid even after parent dies
         self._grace_until = 0.0
+        self._watchdog_timer = None
+        self._stream_confirmed = True   # False while a stream URL has never produced output
+        self._pending_load = None       # deferred loadfile path after kill-restart
         self._start_process()
 
     def _start_process(self):
         cmd = ["mplayer", "-slave", "-idle", "-nolirc",
-               "-vo", "null", "-ao", "alsa",
-               "-cache", "512", "-cache-min", "10"]
+               "-vo", "null", "-ao", "alsa"]
         Log.info("mplayer command: %s", " ".join(cmd))
         try:
             self._process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
             )
+            self._pgid = self._process.pid  # with start_new_session pgid == pid
+            Log.info("mplayer started: pid %d pgid %d", self._process.pid, self._pgid)
             threading.Thread(target=self._monitor, daemon=True).start()
         except FileNotFoundError:
+            Log.error("mplayer not found — install it for audio playback")
             self._process = None
+            self._pgid = None
+
+    def _kill_mplayer(self):
+        """Kill mplayer's entire process group (children hold the pipe write-end).
+        Safe to call after the parent has already been reaped — pgid remains valid."""
+        pgid = self._pgid
+        if not pgid:
+            return
+        self._pgid = None  # clear before kill so a second call is a no-op
+        Log.info("mplayer: sending SIGKILL to process group %d", pgid)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError) as e:
+            Log.warning("mplayer: killpg(%d) failed: %s", pgid, e)
+
+    def _reset_watchdog(self, gen, is_stream, initial=False):
+        # Must be called with self._lock held.
+        if self._watchdog_timer:
+            self._watchdog_timer.cancel()
+        if is_stream:
+            timeout = 10.0 if initial else 30.0
+        else:
+            timeout = 1.5
+        t = threading.Timer(timeout, self._eof_watchdog, args=[gen])
+        t.daemon = True
+        t.start()
+        self._watchdog_timer = t
 
     def _monitor(self):
-        _watchdog = [None]
-
-        def _reset_watchdog(gen):
-            if _watchdog[0]:
-                _watchdog[0].cancel()
-            with self._lock:
-                is_stream = self._is_url(self.current_file or "")
-            timeout = 30.0 if is_stream else 1.5
-            t = threading.Timer(timeout, self._eof_watchdog, args=[gen])
-            t.daemon = True
-            t.start()
-            _watchdog[0] = t
-
         for line in self._process.stdout:
-            line = line.strip()
+            line = re.sub(r'\x1b\[[^a-zA-Z]*[a-zA-Z]|\x1b.', '', line).strip()
             if not line:
                 continue
 
@@ -397,6 +562,8 @@ class _MplayerPlayer(_BasePlayer):
                 m = re.match(r'A:\s*([\d.]+).*?of\s*([\d.]+)', line)
                 now = time.monotonic()
                 with self._lock:
+                    gen = self._generation
+                    is_stream = self._is_url(self.current_file or "")
                     if m:
                         try:
                             self.position = float(m.group(1))
@@ -412,10 +579,10 @@ class _MplayerPlayer(_BasePlayer):
                             except ValueError:
                                 pass
                     need_dur = self.duration == 0.0 and now >= self._grace_until
-                    gen = self._generation
+                    self._stream_confirmed = True
+                    self._reset_watchdog(gen, is_stream)
                 if need_dur:
                     self._send("get_time_length")
-                _reset_watchdog(gen)
                 continue
 
             if line.startswith("ANS_LENGTH="):
@@ -435,16 +602,87 @@ class _MplayerPlayer(_BasePlayer):
                 with self._lock:
                     self.stream_title = title or None
                     gen = self._generation
+                    self._stream_confirmed = True
+                    self._reset_watchdog(gen, True)
                 if title:
                     Log.info("Stream: %s", title)
-                _reset_watchdog(gen)
+                continue
+
+            # Sync state when mplayer reports which file it actually started.
+            # Rapid loadfile commands can be swallowed during cache-fill, so
+            # mplayer may play a different file than current_file reflects.
+            m = re.match(r"^Playing (.+)\.$", line)
+            if m:
+                actual = m.group(1)
+                if not self._is_url(actual):
+                    with self._lock:
+                        if actual != self.current_file and actual in self.playlist:
+                            Log.warning(
+                                "mplayer plays %s — expected %s, syncing state",
+                                os.path.basename(actual),
+                                os.path.basename(self.current_file or ""),
+                            )
+                            self.current_index = self.playlist.index(actual)
+                            self.current_file = actual
+                            self.stream_title = None
+
+            # All other lines — log and check for stream errors.
+            is_ipv6_noise = "AF_INET6" in line
+            is_error = not is_ipv6_noise and bool(re.search(
+                r"error|failed|refused|could not|couldn't|invalid|timeout",
+                line, re.IGNORECASE,
+            ))
+            if is_error:
+                Log.error("mplayer: %s", line)
+                with self._lock:
+                    gen = self._generation
+                    is_stream = self._is_url(self.current_file or "")
+                    confirmed = self._stream_confirmed
+                if is_stream and not confirmed:
+                    self._eof_watchdog(gen)
+            else:
+                Log.info("mplayer: %s", line)
+
+        # Process exited (killed or crashed).
+        with self._lock:
+            if self._watchdog_timer:
+                self._watchdog_timer.cancel()
+                self._watchdog_timer = None
+            if self.state == "playing":
+                self.state = "stopped"
+                gen = self._generation
+            else:
+                gen = None
+            pending_path = self._pending_load
+            self._pending_load = None
+
+        if not pending_path and gen is not None:
+            threading.Timer(0.3, self._try_auto_advance, args=[gen]).start()
+
+        Log.warning("mplayer process exited; restarting")
+        self._start_process()
+
+        if pending_path:
+            is_url = self._is_url(pending_path)
+            with self._lock:
+                self.state = "playing"
+                self._grace_until = time.monotonic() + 0.5
+                self._stream_confirmed = not is_url
+                self._reset_watchdog(self._generation, is_url, initial=True)
+            escaped = pending_path.replace("\\", "\\\\").replace('"', '\\"')
+            Log.info("mplayer << loadfile %s (deferred after restart)", pending_path)
+            self._send(f'loadfile "{escaped}"')
 
     def _eof_watchdog(self, gen):
         with self._lock:
             if gen != self._generation or self.state != "playing":
                 return
-            Log.info("mplayer: track ended")
+            failed = self.current_file
             self.state = "stopped"
+        if self._is_url(failed or ""):
+            Log.error("Stream URL failed or timed out: %s", failed)
+        else:
+            Log.info("mplayer: track ended")
         self._try_auto_advance(gen)
 
     def _send(self, cmd):
@@ -453,25 +691,43 @@ class _MplayerPlayer(_BasePlayer):
                 self._process.stdin.write(cmd + "\n")
                 self._process.stdin.flush()
             except BrokenPipeError:
-                pass
+                Log.warning("mplayer stdin broken pipe on command: %s", cmd)
 
     def seek(self, fraction):
         with self._lock:
-            if self.state in ("playing", "paused"):
-                Log.info("mplayer << seek %.1f%%", fraction * 100)
-                self._send(f"seek {fraction * 100:.2f} 1")
+            if self.state in ("playing", "paused") and self.duration > 0:
+                secs = fraction * self.duration
+                Log.info("mplayer << seek %.2fs (%.1f%%)", secs, fraction * 100)
+                self._send(f"seek {secs:.2f} 2")
 
     def _do_load(self, path):
-        self.state = "playing"          # optimistic; lock is held by caller
-        self._grace_until = time.monotonic() + 0.5  # ignore stale A: lines for 500ms
+        is_url = self._is_url(path)
+        # mplayer blocks stdin while connecting to a dead stream.
+        # Kill it and defer the load to after the process restarts.
+        if not self._stream_confirmed and self._pgid:
+            Log.info("mplayer: killing hung stream, will load %s after restart", path)
+            self._pending_load = path
+            self._kill_mplayer()
+            return
+        self.state = "playing"
+        self._grace_until = time.monotonic() + 0.5
+        self._stream_confirmed = not is_url
         escaped = path.replace("\\", "\\\\").replace('"', '\\"')
         Log.info("mplayer << loadfile %s", path)
         self._send(f'loadfile "{escaped}"')
+        self._reset_watchdog(self._generation, is_url, initial=True)
 
     def _do_stop(self):
-        self._send("stop")
+        self._pending_load = None  # discard any deferred load
+        if not self._stream_confirmed and self._pgid:
+            Log.info("mplayer: killing stream on stop")
+            self._kill_mplayer()
+        else:
+            self._send("stop")
 
     def _do_pause_locked(self):
+        if self._is_url(self.current_file or ""):
+            return  # streams: pause is disabled; use Stop to disconnect
         if self.state == "playing":
             self.state = "paused"
             self._send("pause")

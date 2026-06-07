@@ -262,13 +262,14 @@ function renderStatus(s) {
 
   lastState = s.state;
   const active = s.state !== 'stopped';
+  const isStream = !s.current_path && !!s.track_name;
 
-  // Single play/pause toggle button
+  // Single play/pause toggle button — pause is meaningless for live streams
   const btnPP = document.getElementById('btn-playpause');
   if (s.state === 'playing') {
     btnPP.innerHTML = '&#9646;&#9646; Pause';
-    btnPP.title = 'Pause';
-    btnPP.disabled = false;
+    btnPP.title = isStream ? 'Use Stop to disconnect' : 'Pause';
+    btnPP.disabled = isStream;
   } else if (s.state === 'paused') {
     btnPP.innerHTML = '&#9654; Resume';
     btnPP.title = 'Resume';
@@ -291,7 +292,6 @@ function renderStatus(s) {
   const dur = s.duration || 0;
   lastDuration = dur;
   const progBar = document.getElementById('progressbar');
-  const isStream = !s.current_path && !!s.track_name;
   if (s.state !== 'stopped' && s.track_name) {
     document.getElementById('prog-current').textContent = fmtTime(dur ? Math.min(s.position, dur) : s.position);
     if (!isStream && dur > 0) {

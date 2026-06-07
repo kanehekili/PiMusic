@@ -1,1 +1,7 @@
+# Python packages (pip install -r requirements.txt)
 flask>=2.0
+
+# System packages (sudo apt install ...)
+# mpg123        — required for mpg123 backend
+# mplayer       — required for mplayer backend
+# mediainfo     — optional, enables track duration display

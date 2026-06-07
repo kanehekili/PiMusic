@@ -34,10 +34,10 @@ Runs on a **Raspberry Pi 1B** — and newer versions as well as on any other har
 
 PiMusic supports two backends, configured in `pimusic.conf`:
 
-| Backend | Formats |
-|---------|---------|
-| **mpg123** (default) | MP3 only |
-| **mplayer** | MP3, OGG, FLAC, AAC, WAV, M4A, WMA, Opus and more |
+| Backend              | `backend =` value | Supported formats                                   |
+|----------------------|-------------------|-----------------------------------------------------|
+| **mpg123** (default) | `mpg123`          | MP3                                                 |
+| **mplayer**          | `mplayer`         | MP3, OGG, FLAC, AAC, WAV, M4A, WMA, Opus and more  |
 
 Switch backend by editing `pimusic.conf`:
 
@@ -52,8 +52,16 @@ With `mpg123`, unsupported formats are silently skipped in the file browser. Wit
 
 ### 1. Copy files to the Pi
 
+From your dev machine:
+
 ```bash
 rsync -av src/ <user>@<pi-ip>:~/pimusic/
+```
+
+Or run this on the Pi itself, pulling from the dev machine:
+
+```bash
+scp -r <dev-user>@<dev-ip>:~/git/PiMusic/src/* ~/pimusic/
 ```
 
 ### 2. Install dependencies

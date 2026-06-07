@@ -179,7 +179,8 @@ def _safe_abs(rel_path):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    backend = "MPlayer" if PLAYER_BACKEND == "mplayer" else "MPG123"
+    return render_template("index.html", backend=backend)
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +199,17 @@ def list_files():
         return jsonify({"error": "Invalid path"}), 400
 
     def _sort_key(n):
+        full = os.path.join(abs_path, n)
+        ext = os.path.splitext(n)[1].lower()
+        if os.path.isdir(full):
+            group = 0
+        elif ext in PLAYLIST_EXTENSIONS:
+            group = 1
+        else:
+            group = 2
         m = re.match(r'^(\d+)', n)
         num = int(m.group(1)) if m else float('inf')
-        return (not os.path.isdir(os.path.join(abs_path, n)), num, n.lower())
+        return (group, num, n.lower())
 
     try:
         names = sorted(os.listdir(abs_path), key=_sort_key)
@@ -311,7 +320,7 @@ def status():
             s["current_path"] = cf_real[len(root):].lstrip("/") if cf_real.startswith(root) else None
             with _dur_lock:
                 cached_secs = _dur_cache.get(cf_real, _NOT_CACHED)
-            if cached_secs is not _NOT_CACHED and cached_secs:
+            if not s.get("duration") and cached_secs is not _NOT_CACHED and cached_secs:
                 s["duration"] = cached_secs
         else:
             s["current_path"] = None
