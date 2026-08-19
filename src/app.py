@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import subprocess
 import threading
 import time
@@ -11,7 +10,7 @@ from flask import Flask, jsonify, render_template, request
 import OSTools
 from OSTools import Log
 from config import HOST, LOG_CONSOLE, MUSIC_ROOT, PLAYER_BACKEND, PLAYLIST_EXTENSIONS, PORT
-from player import create_player
+from player import create_player, track_sort_key
 
 OSTools.setupRotatingLogger("PiMusic", LOG_CONSOLE)
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
@@ -207,9 +206,7 @@ def list_files():
             group = 1
         else:
             group = 2
-        m = re.match(r'^(\d+)', n)
-        num = int(m.group(1)) if m else float('inf')
-        return (group, num, n.lower())
+        return (group,) + track_sort_key(n)
 
     try:
         names = sorted(os.listdir(abs_path), key=_sort_key)

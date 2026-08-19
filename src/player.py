@@ -10,6 +10,13 @@ from config import MUSIC_ROOT, PLAYLIST_EXTENSIONS
 from OSTools import Log
 
 
+def track_sort_key(name):
+    """Natural sort: a leading number sorts numerically ("2-x" before "10-x")."""
+    m = re.match(r'^(\d+)', name)
+    num = int(m.group(1)) if m else float('inf')
+    return (num, name.lower())
+
+
 # ======================================================================
 # Shared base — playlist management, state, parsers
 # ======================================================================
@@ -181,7 +188,7 @@ class _BasePlayer:
             names = sorted(
                 (n for n in os.listdir(folder)
                  if os.path.splitext(n)[1].lower() in self.audio_extensions),
-                key=str.lower,
+                key=track_sort_key,
             )
         except OSError:
             return [path], 0
