@@ -1,0 +1,71 @@
+def version = gradle.ext.version
+
+// The tar lands next to the templates, not in a dist/ tree
+def outDir  = file("build")
+def tarFile = file("${outDir}/pimusic${version}.tar")
+
+// ── version references ────────────────────────────────────────────────────────
+
+tasks.register("update_version") {
+    description = "Write the version from settings.gradle into README.md and src/app.py"
+    group       = "packaging"
+    doLast {
+        def readme = file("README.md")
+        def text   = readme.text
+        text = text.replaceAll(/Version \d+\.\d+\.\d+/, "Version ${version}")
+        // download link: the tar name appears in both the link text and the URL
+        text = text.replaceAll(/pimusic\d+\.\d+\.\d+\.tar/, "pimusic${version}.tar")
+        text = text.replaceAll(/(releases\/download\/)\d+\.\d+\.\d+/, "\$1${version}")
+        readme.text = text
+        println "  README.md  -> ${version}"
+
+        // app.py carries the version as a real constant: ansible deploys src/
+        // straight to the device, so a build-time placeholder would ship unresolved
+        def appPy = file("src/app.py")
+        appPy.text = appPy.text.replaceAll(/VERSION = "\d+\.\d+\.\d+"/, "VERSION = \"${version}\"")
+        println "  src/app.py -> ${version}"
+    }
+}
+
+// ── tarball ───────────────────────────────────────────────────────────────────
+
+tasks.register("build_tar") {
+    description = "Create build/pimusic<version>.tar from src/"
+    group       = "packaging"
+    dependsOn   "update_version"
+
+    doLast {
+        def stage = file("${outDir}/stage/pimusic")
+        delete stage
+        stage.mkdirs()
+
+        // Explicit includes: duration_cache.json, the log and __pycache__ live
+        // in src/ and must never end up in the tar
+        copy {
+            from("src") {
+                include "*.py"
+                include "pimusic.conf"
+                include "pimusic.service"
+                include "requirements.txt"
+            }
+            into stage
+        }
+        copy { from "src/templates" into "${stage}/templates" }
+        copy { from "src/static"    into "${stage}/static" }
+
+        delete tarFile
+        ant.tar(destfile: tarFile) {
+            tarfileset(dir: stage.parent, includes: "pimusic/**")
+        }
+        delete file("${outDir}/stage")
+        println "  ${tarFile.name}  (${tarFile.length().intdiv(1024)} kB)"
+    }
+}
+
+tasks.register("clean") {
+    description = "Delete the generated tarball"
+    group       = "build"
+    doLast { delete tarFile, file("${outDir}/stage") }
+}
+
+defaultTasks "build_tar"

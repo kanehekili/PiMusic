@@ -1,0 +1,16 @@
+# Created by Ansible on the first deploy. Later deploys leave it alone
+# unless overwrite_conf=true in the inventory.
+[music]
+# Full path to the folder containing your music files and playlists.
+# This folder must be accessible on the device when the service runs.
+root = {{ music_root }}
+
+[server]
+host = {{ server_host }}
+port = {{ server_port }}
+# false on the device: log goes to ~/.config/PiMusic/PiMusic.log
+log_console = false
+
+[player]
+# Audio backend: mpg123 (MP3 only) or mplayer (MP3, OGG, FLAC, AAC, ...)
+backend = {{ player_backend }}

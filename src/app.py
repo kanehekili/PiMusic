@@ -12,7 +12,10 @@ from OSTools import Log
 from config import HOST, LOG_CONSOLE, MUSIC_ROOT, PLAYER_BACKEND, PLAYLIST_EXTENSIONS, PORT
 from player import create_player, track_sort_key
 
+VERSION = "1.0.1"
+
 OSTools.setupRotatingLogger("PiMusic", LOG_CONSOLE)
+OSTools.setLogLevel("Info")
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 app = Flask(__name__)
@@ -28,7 +31,7 @@ def _inject_static_ver():
             return 0
     return {"static_ver": static_ver}
 _player = create_player(PLAYER_BACKEND)
-Log.info("PiMusic started — backend: %s, music root: %s", PLAYER_BACKEND, MUSIC_ROOT)
+Log.info("PiMusic %s started — backend: %s, music root: %s", VERSION, PLAYER_BACKEND, MUSIC_ROOT)
 
 # ---------------------------------------------------------------------------
 # Duration cache (mediainfo, background)
@@ -74,7 +77,7 @@ def _save_duration_cache():
 
 def _fetch_durations(root):
     if not _retriever_lock.acquire(blocking=False):
-        Log.info("Duration retriever: already running, skipping new request")
+        Log.debug("Duration retriever: already running, skipping new request")
         return
     try:
         all_found = set()
@@ -99,7 +102,7 @@ def _fetch_durations(root):
                      len(stale), "y" if len(stale) == 1 else "ies")
 
         if not queue:
-            Log.info("Duration retriever: nothing new under %s", root)
+            Log.debug("Duration retriever: nothing new under %s", root)
             return
 
         Log.info("Duration retriever: started, %d file(s) queued under %s",
@@ -143,7 +146,7 @@ def _fetch_durations(root):
                 _dur_cache[path] = secs
             if secs:
                 _save_duration_cache()
-                Log.info("Duration retriever: %s → %s — UI will refresh", os.path.basename(path), _fmt_dur(secs))
+                Log.debug("Duration retriever: %s → %s — UI will refresh", os.path.basename(path), _fmt_dur(secs))
             else:
                 Log.warning("Duration retriever: %s → no duration found", os.path.basename(path))
 
@@ -170,6 +173,73 @@ def _safe_abs(rel_path):
     root = os.path.realpath(MUSIC_ROOT)
     candidate = os.path.realpath(os.path.join(root, rel_path.lstrip("/")))
     return candidate if candidate.startswith(root) else None
+
+
+# ---------------------------------------------------------------------------
+# Favorites (favorites.m3u in the music root)
+# ---------------------------------------------------------------------------
+
+_FAV_NAME = "favorites.m3u"
+_fav_lock = threading.Lock()
+
+
+def _fav_file():
+    return os.path.join(os.path.realpath(MUSIC_ROOT), _FAV_NAME)
+
+
+def _read_favorites():
+    """Return favorite tracks as root-relative paths, in file order."""
+    favs = []
+    try:
+        with open(_fav_file(), encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    favs.append(line.replace("\\", "/").lstrip("/"))
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        Log.warning("Favorites: cannot read %s: %s", _FAV_NAME, e)
+    return favs
+
+
+def _write_favorites(favs):
+    with open(_fav_file(), "w", encoding="utf-8") as fh:
+        fh.write("#EXTM3U\n")
+        for rel in favs:
+            fh.write(rel + "\n")
+
+
+@app.route("/api/favorite", methods=["POST"])
+def toggle_favorite():
+    root_err = _check_root()
+    if root_err:
+        return jsonify(root_err), 503
+    data = request.get_json(force=True, silent=True) or {}
+    rel = (data.get("path") or "").strip("/")
+    want = bool(data.get("favorite"))
+    abs_path = _safe_abs(rel)
+    if abs_path is None or not os.path.isfile(abs_path):
+        return jsonify({"error": "File not found"}), 404
+    if os.path.splitext(rel)[1].lower() not in _player.audio_extensions:
+        return jsonify({"error": "Not an audio file"}), 400
+
+    with _fav_lock:
+        favs = _read_favorites()
+        if want and rel not in favs:
+            favs.append(rel)
+        elif not want and rel in favs:
+            favs = [f for f in favs if f != rel]
+        else:
+            return jsonify({"ok": True, "favorite": want})
+        try:
+            _write_favorites(favs)
+        except OSError as e:
+            Log.error("Favorites: cannot write %s: %s", _FAV_NAME, e)
+            return jsonify({"error": "write_failed",
+                            "message": f"Could not write {_FAV_NAME}: {e}"}), 500
+    Log.info("Favorite %s: %s", "added" if want else "removed", rel)
+    return jsonify({"ok": True, "favorite": want})
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +283,7 @@ def list_files():
     except PermissionError:
         return jsonify({"error": "Permission denied"}), 403
 
+    favs = set(_read_favorites())
     entries = []
     uncached = []
     for name in names:
@@ -229,9 +300,11 @@ def list_files():
                 dur_str = None
             else:
                 dur_str = _fmt_dur(cached) if cached else None
+            entry_path = f"{rel}/{name}".lstrip("/")
             entries.append({"name": name, "type": "audio",
-                            "path": f"{rel}/{name}".lstrip("/"),
-                            "duration": dur_str})
+                            "path": entry_path,
+                            "duration": dur_str,
+                            "fav": entry_path in favs})
         elif ext in PLAYLIST_EXTENSIONS:
             entries.append({"name": name, "type": "playlist",
                             "path": f"{rel}/{name}".lstrip("/")})

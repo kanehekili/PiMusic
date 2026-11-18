@@ -91,6 +91,7 @@ function makeItem(entry) {
   li.appendChild(label);
   li.appendChild(dur);
   li.appendChild(typeBadge);
+  li.appendChild(makeFavCell(entry));
 
   li.addEventListener('click', () => {
     if (entry.type === 'dir' || entry.type === 'parent') {
@@ -108,6 +109,60 @@ function makeItem(entry) {
   });
 
   return li;
+}
+
+function revealTrack() {
+  // Browses to the folder holding the playing track
+  if (!currentPlayingPath) return;
+  browse(currentPlayingPath.includes('/')
+    ? currentPlayingPath.split('/').slice(0, -1).join('/')
+    : '');
+}
+
+function showToast(msg) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+function setFavLook(btn, on) {
+  btn.classList.toggle('is-fav', on);
+  btn.textContent = on ? '★' : '☆';
+  btn.title = on ? 'Remove from favorites' : 'Add to favorites';
+}
+
+function makeFavCell(entry) {
+  // Audio rows get the star; every other row keeps an empty cell of equal width
+  if (entry.type !== 'audio') {
+    const spacer = document.createElement('span');
+    spacer.className = 'col-fav';
+    return spacer;
+  }
+  const btn = document.createElement('button');
+  btn.className = 'col-fav fav-btn';
+  setFavLook(btn, !!entry.fav);
+  btn.addEventListener('dblclick', ev => ev.stopPropagation());
+  btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const on = !btn.classList.contains('is-fav');
+    setFavLook(btn, on);
+    fetch('/api/favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: entry.path, favorite: on }),
+    })
+      .then(r => r.json().catch(() => ({ error: 'bad_reply', message: 'Server returned ' + r.status })))
+      .then(d => {
+        if (!d.error) return;
+        setFavLook(btn, !on);
+        showToast(d.message || d.error);
+      })
+      .catch(() => { setFavLook(btn, !on); showToast('Could not reach the server.'); });
+  });
+  return btn;
 }
 
 function iconFor(type) {
@@ -261,6 +316,8 @@ function renderStatus(s) {
   badge.className = 'badge ' + s.state;
 
   lastState = s.state;
+  const btnReveal = document.getElementById('btn-reveal');
+  if (btnReveal) btnReveal.disabled = !currentPlayingPath;
   const active = s.state !== 'stopped';
   const isStream = !s.current_path && !!s.track_name;
 

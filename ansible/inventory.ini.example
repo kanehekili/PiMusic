@@ -1,0 +1,31 @@
+# Copy this to inventory.ini and edit it. inventory.ini is gitignored —
+# it holds your hostnames and paths and is never distributed.
+#
+#   cp inventory.ini.example inventory.ini
+
+[pimusic]
+# Hostname or IP of the device, and the SSH user to log in as
+raspberrypi.local ansible_user=pi
+
+[pimusic:vars]
+# Where the app is installed on the device
+deploy_dir=/home/pi/pimusic
+
+# Written into pimusic.conf on the FIRST deploy only (see overwrite_conf below)
+music_root=/mnt/music
+server_host=0.0.0.0
+server_port=5054
+
+# Audio backend — also the name of the package the playbook installs:
+#   mpg123  = MP3 only
+#   mplayer = MP3, OGG, FLAC, AAC, WAV, M4A, WMA, Opus
+player_backend=mpg123
+
+# true = rewrite the device's pimusic.conf from the values above on every deploy
+overwrite_conf=false
+
+# false = skip installing flask / mediainfo / the audio backend
+install_packages=true
+
+# systemd unit name
+service_name=pimusic

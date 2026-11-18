@@ -1,0 +1,135 @@
+---
+# Full deploy — packages, code, config, systemd unit:
+#   ansible-playbook deploy.yml -K
+# Code update only — sync changed files and restart the service:
+#   ansible-playbook update.yml -K
+- name: "{{ 'Update PiMusic code' if update_only | bool else 'Deploy PiMusic' }}"
+  hosts: pimusic
+  gather_facts: false
+
+  vars:
+    src_dir: "{{ playbook_dir }}/../src"
+    deploy_dir: "/home/{{ ansible_facts['user_id'] }}/pimusic"
+    service_name: pimusic
+    music_root: /mnt/music
+    server_host: 0.0.0.0
+    server_port: 5054
+    player_backend: mpg123
+    install_packages: true
+    overwrite_conf: false
+    update_only: false
+    flask_package: "{{ 'python-flask' if ansible_facts['pkg_mgr'] == 'pacman' else 'python3-flask' }}"
+
+  tasks:
+    - name: Gather the two facts the playbook reads
+      ansible.builtin.setup:
+        gather_subset: ["!all", "!min", "user", "pkg_mgr"]
+
+    - name: Look for the source tree
+      ansible.builtin.stat:
+        path: "{{ src_dir }}/app.py"
+      delegate_to: localhost
+      become: false
+      register: src_check
+
+    - name: Fail early when the source tree is missing
+      ansible.builtin.assert:
+        that: src_check.stat.exists
+        fail_msg: "No sources at {{ src_dir }} — run this from the ansible/ directory of the PiMusic checkout."
+
+    - name: Sync the application files
+      ansible.posix.synchronize:
+        src: "{{ src_dir }}/"
+        dest: "{{ deploy_dir }}/"
+        archive: false
+        recursive: true
+        perms: true
+        times: true
+        rsync_opts:
+          - "--exclude=__pycache__/"
+          - "--exclude=*.pyc"
+          - "--exclude=*.log"
+          - "--exclude=duration_cache.json"
+          - "--exclude=pimusic.conf"
+          - "--exclude=pimusic.service"
+      notify:
+        - Restart PiMusic
+        - Remind about the manual restart
+
+    - name: Install system packages
+      ansible.builtin.package:
+        name: "{{ [flask_package, 'mediainfo', player_backend] }}"
+        state: present
+      become: true
+      when: not update_only | bool and install_packages | bool
+
+    - name: Create pimusic.conf (left untouched if it already exists)
+      ansible.builtin.template:
+        src: pimusic.conf.j2
+        dest: "{{ deploy_dir }}/pimusic.conf"
+        mode: "0644"
+        force: "{{ overwrite_conf | bool }}"
+      when: not update_only | bool
+      notify:
+        - Restart PiMusic
+        - Remind about the manual restart
+
+    - name: Look for the audio group
+      ansible.builtin.command: getent group audio
+      changed_when: false
+      failed_when: false
+      register: audio_group
+      when: not update_only | bool
+
+    - name: Put the service user in the audio group
+      ansible.builtin.user:
+        name: "{{ ansible_facts['user_id'] }}"
+        groups: audio
+        append: true
+      become: true
+      when: not update_only | bool and audio_group.rc | default(1) == 0
+
+    - name: Check whether the unit is already installed
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ service_name }}.service"
+      register: unit_before
+      when: not update_only | bool
+
+    - name: Install the systemd unit
+      ansible.builtin.template:
+        src: pimusic.service.j2
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        mode: "0644"
+      become: true
+      when: not update_only | bool
+      notify:
+        - Restart PiMusic
+        - Remind about the manual restart
+
+    - name: Enable and start PiMusic on a first install
+      ansible.builtin.systemd_service:
+        name: "{{ service_name }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+      become: true
+      when: not update_only | bool and not (unit_before.stat.exists | default(true))
+
+    - name: Report the player URL
+      ansible.builtin.debug:
+        msg: "PiMusic in {{ deploy_dir }} — http://{{ inventory_hostname }}:{{ server_port }}"
+
+  handlers:
+    - name: Restart PiMusic
+      ansible.builtin.systemd_service:
+        name: "{{ service_name }}"
+        state: restarted
+      become: true
+      when: update_only | bool
+
+    - name: Remind about the manual restart
+      ansible.builtin.debug:
+        msg: >-
+          Files changed — on the device run:
+          sudo systemctl daemon-reload && sudo systemctl restart {{ service_name }}
+      when: not update_only | bool and (unit_before.stat.exists | default(false))

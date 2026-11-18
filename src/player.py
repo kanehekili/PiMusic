@@ -333,7 +333,9 @@ class _Mpg123Player(_BasePlayer):
             line = line.strip()
             if not line:
                 continue
-            if not line.startswith("@F"):
+            if line.startswith("@I"):
+                Log.debug("mpg123 >> %s", line)
+            elif not line.startswith("@F"):
                 Log.info("mpg123 >> %s", line)
             if line.startswith("@E"):
                 Log.warning("mpg123 error: %s", line[2:].strip())
@@ -648,7 +650,7 @@ class _MplayerPlayer(_BasePlayer):
                 if is_stream and not confirmed:
                     self._eof_watchdog(gen)
             else:
-                Log.info("mplayer: %s", line)
+                Log.debug("mplayer: %s", line)
 
         # Process exited (killed or crashed).
         with self._lock:

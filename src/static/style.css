@@ -69,6 +69,26 @@ header {
 }
 #track-pos { font-size: 0.75rem; color: #9ca3af; }
 
+/* Jump to the playing track — control-button geometry, link-blue text */
+#btn-reveal {
+  flex-shrink: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #374151;
+  color: #60a5fa;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#btn-reveal svg { width: 1.2em; height: 1.2em; }
+#btn-reveal:hover:not(:disabled) { background: #4b5563; }
+#btn-reveal:disabled { opacity: 0.35; cursor: default; }
+
 #controls { display: flex; gap: 0.5rem; }
 #controls button {
   background: #374151;
@@ -157,6 +177,7 @@ header {
 @media (max-width: 600px) {
   #controls    { order: 1; width: 100%; }
   #now-playing { order: 2; }
+  #btn-reveal  { order: 3; }
 }
 
 /* File browser */
@@ -179,7 +200,7 @@ header {
 #file-list { list-style: none; }
 #file-list li {
   display: grid;
-  grid-template-columns: 1.5rem 1fr auto auto;
+  grid-template-columns: 1.5rem 1fr auto auto 2.25rem;
   align-items: center;
   gap: 0.6rem;
   padding: 0.45rem 0.5rem;
@@ -192,6 +213,27 @@ header {
 .col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-dur  { font-size: 0.8rem; color: #9ca3af; text-align: right; min-width: 3.5rem; }
 .col-type { font-size: 0.7rem; color: #6b7280; text-align: right; min-width: 2rem; }
+.col-fav {
+  justify-self: end;
+  width: 2.25rem;
+  min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #fbbf24;
+  opacity: 0.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.col-fav.is-fav { opacity: 1; }
+@media (hover: hover) {
+  .col-fav:hover { opacity: 0.75; }
+  .col-fav.is-fav:hover { opacity: 1; }
+}
 #file-list li:hover { background: #1f2937; }
 li.config-error {
   color: #fca5a5;
@@ -218,3 +260,25 @@ li[data-type="dir"]      .icon { color: #fbbf24; }
 li[data-type="playlist"] .icon { color: #a78bfa; }
 li[data-type="audio"]    .icon { color: #34d399; }
 li[data-type="parent"]   .icon { color: #9ca3af; }
+
+/* Transient error message */
+#toast {
+  position: fixed;
+  left: 50%; bottom: 4.5rem;
+  transform: translateX(-50%);
+  max-width: 90vw;
+  background: #3b1010; color: #fca5a5;
+  border: 1px solid #7f1d1d; border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  z-index: 20;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+#toast.show { opacity: 1; }
+
+/* Touch screens: larger star, larger tap target */
+@media (max-width: 600px) {
+  #file-list li { grid-template-columns: 1.5rem 1fr auto auto 3rem; }
+  .col-fav { width: 3rem; min-height: 3rem; font-size: 1.8rem; }
+}

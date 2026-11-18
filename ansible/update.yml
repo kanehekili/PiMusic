@@ -1,0 +1,7 @@
+---
+# Code update only: sync changed files and restart the service.
+# Skips packages, the audio group, pimusic.conf and the systemd unit.
+#   ansible-playbook update.yml -K
+- import_playbook: deploy.yml
+  vars:
+    update_only: true

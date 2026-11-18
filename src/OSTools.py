@@ -37,4 +37,15 @@ def setupRotatingLogger(logName, logConsole):
     )
 
 
+def setLogLevel(levelString):
+    if levelString == "Debug":
+        Log.setLevel(logging.DEBUG)
+    elif levelString == "Info":
+        Log.setLevel(logging.INFO)
+    elif levelString == "Warning":
+        Log.setLevel(logging.WARNING)
+    elif levelString == "Error":
+        Log.setLevel(logging.ERROR)
+
+
 Log = logging.getLogger("Main")

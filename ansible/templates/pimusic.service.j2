@@ -1,0 +1,15 @@
+# Managed by Ansible — edit ansible/templates/pimusic.service.j2, not this file.
+[Unit]
+Description=PiMusic web player
+After=network.target
+
+[Service]
+Type=simple
+User={{ ansible_facts['user_id'] }}
+WorkingDirectory={{ deploy_dir }}
+ExecStart=/usr/bin/python3 {{ deploy_dir }}/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

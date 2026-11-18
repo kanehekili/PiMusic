@@ -25,6 +25,16 @@
     <span id="track-name">Nothing playing</span>
     <span id="track-pos"></span>
   </div>
+  <button id="btn-reveal" title="Show the playing track in the list"
+          aria-label="Show the playing track in the list"
+          onclick="revealTrack()" disabled>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="12" cy="12" r="2.3" fill="currentColor"/>
+      <path d="M12 1v3.4M12 19.6V23M1 12h3.4M19.6 12H23"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </button>
   <div id="controls">
     <button id="btn-prev"      title="Previous track" onclick="cmdPrev()"      disabled>&#9664;&#9664;</button>
     <button id="btn-playpause" title="Play"            onclick="cmdPlayPause()" disabled>&#9654; Play</button>

@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 *.log
+ansible/inventory.ini
+/dist/
+/.gradle/
